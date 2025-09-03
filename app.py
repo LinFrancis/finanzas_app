@@ -54,7 +54,7 @@ SPREADSHEET_KEY = "1noLcfx2JjA2AhPUoRJ0t3ZG7XV8fiNkaGl5Gro9aUS4"
 
 HOJA = "finanzas"
 
-USUARIOS = ["🦧Javiera", "🪈Francis", "🎧Felipe", "🍷Feña"]
+USUARIOS = ["🐳Javiera", "🪈Francis", "🎧Felipe", "🍷Feña"]
 
 
 # =========================
