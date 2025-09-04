@@ -153,6 +153,75 @@ def _calc_total_aucca(df: pd.DataFrame) -> int:
     return int(saldos["Saldo"].sum())
 
 
+def _calc_ajustes_gastos(df: pd.DataFrame) -> dict:
+    df_ok = df[~df["Anulado_bool"]].copy()
+    gastos = df_ok[df_ok["Tipo"] == "Gasto"].groupby("Persona")["Monto_int"].sum()
+    gastos = gastos.reindex(USUARIOS, fill_value=0)
+
+    total = gastos.sum()
+    ideal = total / len(USUARIOS)
+
+    # Balances: positivo = gastó de más, negativo = gastó de menos
+    balances = {p: g - ideal for p, g in gastos.items()}
+
+    deudores = [(p, -bal) for p, bal in balances.items() if bal < 0]
+    acreedores = [(p, bal) for p, bal in balances.items() if bal > 0]
+
+    deudores.sort(key=lambda x: x[1], reverse=True)
+    acreedores.sort(key=lambda x: x[1], reverse=True)
+
+    ajustes = []
+    i, j = 0, 0
+    while i < len(deudores) and j < len(acreedores):
+        deudor, debe = deudores[i]
+        acreedor, recibe = acreedores[j]
+
+        monto = min(debe, recibe)
+        ajustes.append({
+            "Deudor": deudor,
+            "Acreedor": acreedor,
+            "Monto": int(monto)
+        })
+
+        deudores[i] = (deudor, debe - monto)
+        acreedores[j] = (acreedor, recibe - monto)
+
+        if deudores[i][1] == 0:
+            i += 1
+        if acreedores[j][1] == 0:
+            j += 1
+
+    # Construimos un reporte explicativo
+    explicacion = []
+    explicacion.append(f"💰 Entre todos se gastó: {int(total)}")
+    explicacion.append(f"👥 Éramos {len(USUARIOS)} personas, por lo que a cada uno le corresponde idealmente: {int(ideal)}")
+
+    explicacion.append("\n📊 Resumen individual:")
+    for persona, gasto in gastos.items():
+        balance = balances[persona]
+        if balance > 0:
+            explicacion.append(f" - {persona} gastó {int(gasto)} (aportó {int(balance)} de más)")
+        elif balance < 0:
+            explicacion.append(f" - {persona} gastó {int(gasto)} (le faltó aportar {int(-balance)})")
+        else:
+            explicacion.append(f" - {persona} gastó {int(gasto)} (justo el ideal)")
+
+    explicacion.append("\n🤝 Ajustes propuestos:")
+    if ajustes:
+        for a in ajustes:
+            explicacion.append(f" - {a['Deudor']} debe pagar {a['Monto']} a {a['Acreedor']}")
+    else:
+        explicacion.append(" - No se requieren ajustes: todos gastaron lo mismo.")
+
+    return {
+        "total": int(total),
+        "ideal": int(ideal),
+        "balances": balances,
+        "ajustes": ajustes,
+        "explicacion": "\n".join(explicacion)
+    }
+
+
 # =========================
 # Formularios
 # =========================
@@ -418,8 +487,6 @@ def _form_ingreso_gasto(tipo: str, cats_existentes: list[str]):
 # Render principal
 # =========================
 
-
-
 def render():
     col1, col2 = st.columns([3,1])
     with col1:
@@ -519,8 +586,62 @@ def render():
                 st.rerun()
         else:
             _form_editar_anular(df)
-                     
+                  
 render()
+
+
+def render_ajustes():
+    df_raw = _load_finanzas_df()
+    df = _normalize_finanzas(df_raw)
+    ajustes_data = _calc_ajustes_gastos(df)
+
+    st.markdown("#### Ajustes para cuadrar gastos")
+
+    st.info(
+        f"💰 Entre todos se gastó: ${ajustes_data['total']:,}\n\n"
+        f"👥 Personas: {len(USUARIOS)}\n\n"
+        f"📌 Ideal por persona: ${ajustes_data['ideal']:,}"
+    )
+
+    # Construir tabla de resumen
+    resumen_rows = []
+    for persona, balance in ajustes_data["balances"].items():
+        gasto = df[df["Persona"] == persona]["Monto_int"].sum()
+
+        if balance > 0:
+            estado = f"✅ aportó ${balance:,.0f} de más"
+        elif balance < 0:
+            estado = f"⚠️ le faltó aportar ${-balance:,.0f}"
+        else:
+            estado = "⚖️ justo el ideal"
+
+        resumen_rows.append({
+            "Persona": persona,
+            "Gasto": f"${gasto:,.0f}",
+            "Balance": estado
+        })
+
+    resumen_df = pd.DataFrame(resumen_rows)
+
+    st.markdown("##### 📊 Resumen individual")
+    st.table(resumen_df)  # o st.dataframe(resumen_df, use_container_width=True)
+
+    # Ajustes necesarios
+    st.markdown("##### 🤝 Ajustes propuestos")
+    if ajustes_data["ajustes"]:
+        ajustes_rows = []
+        for a in ajustes_data["ajustes"]:
+            ajustes_rows.append({
+                "Deudor": a["Deudor"],
+                "Acreedor": a["Acreedor"],
+                "Monto": f"${a['Monto']:,}"
+            })
+        st.table(pd.DataFrame(ajustes_rows))
+    else:
+        st.success("🎉 Todos han gastado lo mismo, no se requieren ajustes.")
+
+render_ajustes()
+
 
 def render_footer():
     # =========================
